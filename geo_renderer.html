@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Geo Renderer</title>
+<style>
+:root{--bg:#0b0f15;--panel:#131923;--line:#293344;--text:#edf2f7;--muted:#9aa6b7;--accent:#c6613f}*{box-sizing:border-box}body{margin:0;height:100vh;overflow:hidden;background:var(--bg);color:var(--text);font:14px system-ui,sans-serif}.app{height:100%;display:grid;grid-template-columns:420px 1fr}.left{display:flex;flex-direction:column;min-width:0;background:var(--panel);border-right:1px solid var(--line)}header,.bar{padding:12px 14px;border-bottom:1px solid var(--line);display:flex;gap:8px;align-items:center}header h1{margin:0;font-size:16px}.muted{color:var(--muted);font-size:12px}.bar{flex-wrap:wrap}.spacer{flex:1}textarea{flex:1;resize:none;border:0;outline:0;background:#090d13;color:#dbe5ef;padding:16px;font:12.5px/1.55 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}button,select{background:#1a2230;color:var(--text);border:1px solid #324055;border-radius:7px;padding:7px 10px;cursor:pointer}button.primary{background:var(--accent);border-color:var(--accent);font-weight:700}.status{padding:8px 12px;border-top:1px solid var(--line);font-size:12px;color:var(--muted)}.ok{color:#72d398}.bad{color:#ff7e7e}.right{display:flex;flex-direction:column;min-width:0}.stage{position:relative;flex:1;min-height:0;background:#0a0d12}svg{width:100%;height:100%;display:block;touch-action:none} .geo-label{paint-order:stroke;stroke:#fff;stroke-width:.16;stroke-linejoin:round;vector-effect:non-scaling-stroke}.geo-label.dark{stroke:#11161d}.ghost{vector-effect:non-scaling-stroke}.hint{position:absolute;left:12px;bottom:12px;padding:7px 9px;border:1px solid #334055;border-radius:7px;background:#0d1219df;color:#b9c4d2;font-size:12px;pointer-events:none}@media(max-width:800px){body{overflow:auto}.app{height:auto;min-height:100vh;grid-template-columns:1fr;grid-template-rows:48vh 52vh}.left{border-right:0;border-bottom:1px solid var(--line)}}
+</style></head><body><div class="app"><section class="left"><header><h1>Geo Renderer</h1><span class="muted">JSON → SVG</span></header><div class="bar"><button class="primary" id="render">Render</button><button id="pretty">Pretty</button><button id="example">Example</button><button id="download">SVG</button></div><textarea id="json" spellcheck="false"></textarea><div id="status" class="status"></div></section><section class="right"><div class="bar"><button id="zin">+</button><button id="zout">−</button><button id="reset">Reset</button><select id="bg"><option value="#fff">White</option><option value="#f7f7f8">Off-white</option><option value="#11161d">Dark</option><option value="none">Transparent</option></select><label class="muted"><input id="grid" type="checkbox" checked> grid</label><label class="muted"><input id="axes" type="checkbox"> axes</label><div class="spacer"></div><span id="meta" class="muted"></span></div><div class="stage"><svg id="svg" xmlns="http://www.w3.org/2000/svg"></svg><div class="hint">Drag to pan · wheel to zoom · Ctrl+Enter render</div></div></section></div>
+<script>
+const EXAMPLE={viewBox:[-10,-7,20,14],style:{stroke:'#17202b',strokeWidth:.07,fill:'none',labelFill:'#17202b',labelSize:.48},points:{A:[-5,-3],B:[5,-3],C:[0,4]},items:[{type:'polygon',points:['A','B','C'],fill:'#dceeff',fillOpacity:.8},{type:'segment',a:'A',b:'B',label:'10',labelOffset:[0,.55]},{type:'segment',a:'B',b:'C',label:'13',labelOffset:[.35,0]},{type:'segment',a:'C',b:'A',label:'11',labelOffset:[-.35,0]},{type:'angle',at:'C',from:'A',to:'B',label:'θ',radius:1},{type:'tick',a:'A',b:'B',count:1},{type:'dimension',a:'A',b:'B',offset:[0,-1],text:'10 units'},{type:'text',x:0,y:-5.5,text:'Triangle ABC',bold:true,size:.6}],labels:{points:true}};
+const $=id=>document.getElementById(id), S=$('svg'), TA=$('json'), ST=$('status');let scene=EXAMPLE,zoom=1,pan=[0,0],drag=false,ds=[0,0],ps=[0,0];TA.value=JSON.stringify(EXAMPLE,null,2);
+const n=(v,d=0)=>Number.isFinite(+v)?+v:d, add=(a,b)=>[a[0]+b[0],a[1]+b[1]], sub=(a,b)=>[a[0]-b[0],a[1]-b[1]], mul=(a,k)=>[a[0]*k,a[1]*k], mid=(a,b)=>[(a[0]+b[0])/2,(a[1]+b[1])/2], L=a=>Math.hypot(a[0],a[1]), U=a=>mul(a,1/(L(a)||1)), P=a=>[-a[1],a[0]], ang=a=>Math.atan2(a[1],a[0]);
+function esc(s){return String(s).replace(/[&<>\"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}function point(ref,pts){if(Array.isArray(ref))return[n(ref[0]),n(ref[1])];if(ref&&typeof ref==='object')return[n(ref.x),n(ref.y)];return pts[ref]?.xy||null}function emit(x){S.insertAdjacentHTML('beforeend',x)}
+const labelBoxes=[];
+function labelMetrics(t,size,anchor){const chars=String(t).length;const w=Math.max(size*.55,chars*size*.52),h=size*1.08;let x0=-w/2;if(anchor==='start')x0=0;if(anchor==='end')x0=-w;return [x0,-h/2,w,h]}
+function overlaps(a,b,pad=.08){return !(a.x+a.w+pad<b.x||b.x+b.w+pad<a.x||a.y+a.h+pad<b.y||b.y+b.h+pad<a.y)}
+function smartLabel(x,y,t,o={}){
+  const size=n(o.size,.48),anchor=o.anchor||'middle', [bx,by,bw,bh]=labelMetrics(t,size,anchor);
+  const g=n(o.gap,.20);
+  const candidates=[
+    [0,-size*1.7],[0,size*1.7],[size*2.1,0],[-size*2.1,0],
+    [size*1.5,-size*1.5],[-size*1.5,-size*1.5],[size*1.5,size*1.5],[-size*1.5,size*1.5],
+    [0,0],[size*2.8,-size*1.2],[-size*2.8,-size*1.2],[size*2.8,size*1.2],[-size*2.8,size*1.2]
+  ];
+  let pick=candidates[0], box;
+  for(const [dx,dy] of candidates){
+    const q={x:x+dx+bx-g,y:y+dy+by-g,w:bw+2*g,h:bh+2*g};
+    if(!labelBoxes.some(z=>overlaps(q,z))){pick=[dx,dy];box=q;break}
+  }
+  if(!box) box={x:x+pick[0]+bx-g,y:y+pick[1]+by-g,w:bw+2*g,h:bh+2*g};
+  labelBoxes.push(box);
+  const cls=o.dark?'geo-label dark':'geo-label';
+  const bg=o.background ?? '#fff';
+  const bgOpacity=n(o.backgroundOpacity,.96);
+  emit(`<g class="geo-label-group"><rect x="${box.x}" y="${box.y}" width="${box.w}" height="${box.h}" rx="${Math.min(.12,Math.max(.03,g*.55))}" fill="${esc(bg)}" opacity="${bgOpacity}"/><text class="${cls}" x="${x+pick[0]}" y="${y+pick[1]}" fill="${esc(o.fill||'#17202b')}" font-size="${size}" font-family="system-ui,sans-serif" font-weight="${o.bold?'700':'400'}" text-anchor="${anchor}" dominant-baseline="middle">${esc(t)}</text></g>`);
+}
+function label(x,y,t,o={}){smartLabel(x,y,t,o)}
+function sty(i,s){return `stroke="${esc(i.stroke??s.stroke??'#17202b')}" stroke-width="${n(i.strokeWidth,s.strokeWidth??.07)}" fill="${esc(i.fill??s.fill??'none')}" opacity="${n(i.opacity,1)}"`}
+function line(i,p,s,kind){let a=point(i.a??i.from,p),b=point(i.b??i.to,p);if(!a||!b)return;let d=U(sub(b,a)),q=a,r=b;if(kind==='line'){q=add(a,mul(d,-1000));r=add(a,mul(d,1000))}else if(kind==='ray')r=add(a,mul(d,1000));emit(`<line class="ghost" x1="${q[0]}" y1="${q[1]}" x2="${r[0]}" y2="${r[1]}" ${sty(i,s)}/>`);if(i.label!=null){let m=mid(a,b),off=i.labelOffset||[0,0];if(!i.labelOffset&&i.labelSide){const side=i.labelSide==='right'?1:-1;off=mul(P(d),side*n(i.labelGap,.28))}m=add(m,off);label(m[0],m[1],i.label,{size:i.labelSize||s.labelSize,fill:i.labelFill||s.labelFill})}}
+function polygon(i,p,s){let q=(i.points||[]).map(x=>point(x,p)).filter(Boolean);if(q.length<2)return;emit(`<polygon points="${q.map(x=>x.join(',')).join(' ')}" ${sty(i,s)} fill-opacity="${n(i.fillOpacity,1)}"/>`)}
+function polyline(i,p,s){let q=(i.points||[]).map(x=>point(x,p)).filter(Boolean);if(q.length<2)return;emit(`<polyline points="${q.map(x=>x.join(',')).join(' ')}" ${sty(i,s)}/>`)}
+function pointItem(i,p,s){let q=point(i.id??i.point,p);if(!q)return;emit(`<circle class="ghost" cx="${q[0]}" cy="${q[1]}" r="${n(i.r,.11)}" fill="${esc(i.fill||'#17202b')}" stroke="${esc(i.stroke||i.fill||'#17202b')}" stroke-width="${n(i.strokeWidth,.025)}"/>`);if(i.label!=null){let o=i.labelOffset||[.18,-.25];label(q[0]+o[0],q[1]+o[1],i.label,{size:i.labelSize||s.labelSize,fill:i.labelFill||s.labelFill||'#17202b',anchor:i.anchor||'start',bold:i.bold})}}
+function circle(i,p,s){let c=point(i.center??i.c,p);if(!c)return;let r=n(i.r,i.radius);if(i.through){let q=point(i.through,p);if(q)r=L(sub(q,c))}if(!(r>0))return;emit(`<circle cx="${c[0]}" cy="${c[1]}" r="${r}" ${sty(i,s)}/>`)}
+function ellipse(i,p,s){let c=point(i.center??i.c,p);if(!c)return;emit(`<ellipse cx="${c[0]}" cy="${c[1]}" rx="${n(i.rx,1)}" ry="${n(i.ry,.5)}" ${sty(i,s)}/>`)}
+function arc(i,p,s){let c=point(i.center??i.c,p);if(!c)return;let r=n(i.r,i.radius,1),a1=n(i.start,0),a2=n(i.end,90);if(i.from!=null)a1=ang(sub(point(i.from,p),c))*180/Math.PI;if(i.to!=null)a2=ang(sub(point(i.to,p),c))*180/Math.PI;let rad=x=>x*Math.PI/180,A=[c[0]+r*Math.cos(rad(a1)),c[1]+r*Math.sin(rad(a1))],B=[c[0]+r*Math.cos(rad(a2)),c[1]+r*Math.sin(rad(a2))],d=((a2-a1)%360+360)%360,delta=i.major?360-d:d;emit(`<path d="M ${A[0]} ${A[1]} A ${r} ${r} 0 ${delta>180?1:0} ${i.clockwise===false?0:1} ${B[0]} ${B[1]}" ${sty(i,s)} fill="none"/>`)}
+function angle(i,p,s){let o=point(i.at,p),a=point(i.from,p),b=point(i.to,p);if(!o||!a||!b)return;let r=n(i.radius,.8),u=U(sub(a,o)),v=U(sub(b,o)),A=add(o,mul(u,r)),B=add(o,mul(v,r)),d=((ang(v)-ang(u))%(2*Math.PI)+2*Math.PI)%(2*Math.PI);emit(`<path d="M ${A[0]} ${A[1]} A ${r} ${r} 0 ${d>Math.PI?1:0} 1 ${B[0]} ${B[1]}" ${sty(i,s)} fill="none"/>`);if(i.label){let w=U(add(u,v));if(L(add(u,v))<1e-6)w=P(u);let q=add(o,mul(w,n(i.labelRadius,r+.22)));label(q[0],q[1],i.label,{size:i.labelSize,fill:i.labelFill})}}
+function rightAngle(i,p,s){let o=point(i.at,p),a=point(i.from,p),b=point(i.to,p);if(!o||!a||!b)return;let z=n(i.size,.5),u=U(sub(a,o)),v=U(sub(b,o)),A=add(o,mul(u,z)),B=add(A,mul(v,z)),C=add(o,mul(v,z));emit(`<path d="M ${A[0]} ${A[1]} L ${B[0]} ${B[1]} L ${C[0]} ${C[1]}" ${sty(i,s)} fill="none"/>`)}
+function tick(i,p,s){let a=point(i.a,p),b=point(i.b,p);if(!a||!b)return;let d=U(sub(b,a)),q=P(d),m=mid(a,b),c=Math.max(1,Math.floor(n(i.count,1))),gap=n(i.spacing,.22),size=n(i.size,.22);for(let k=0;k<c;k++){let z=add(m,mul(d,(k-(c-1)/2)*gap)),A=add(z,mul(q,size)),B=add(z,mul(q,-size));emit(`<line x1="${A[0]}" y1="${A[1]}" x2="${B[0]}" y2="${B[1]}" ${sty(i,s)}/>` )}}
+function dimension(i,p,s){let a=point(i.a,p),b=point(i.b,p);if(!a||!b)return;let o=i.offset||[0,-.7],A=add(a,o),B=add(b,o);emit(`<g class="ghost" ${sty(i,s,'')}><line x1="${a[0]}" y1="${a[1]}" x2="${A[0]}" y2="${A[1]}" opacity=".55"/><line x1="${b[0]}" y1="${b[1]}" x2="${B[0]}" y2="${B[1]}" opacity=".55"/><line x1="${A[0]}" y1="${A[1]}" x2="${B[0]}" y2="${B[1]}"/></g>`);let d=U(sub(B,A)),z=n(i.arrow,.16),nrm=P(d),a1=add(A,add(mul(d,z),mul(nrm,z*.55))),a2=add(A,add(mul(d,z),mul(nrm,-z*.55))),b1=add(B,add(mul(d,-z),mul(nrm,z*.55))),b2=add(B,add(mul(d,-z),mul(nrm,-z*.55)));emit(`<path d="M ${a1[0]} ${a1[1]} L ${A[0]} ${A[1]} L ${a2[0]} ${a2[1]} M ${b1[0]} ${b1[1]} L ${B[0]} ${B[1]} L ${b2[0]} ${b2[1]}" ${sty(i,s)} fill="none"/>`);label((A[0]+B[0])/2,(A[1]+B[1])/2+n(i.textOffset,.22),i.text??i.label??fmt(L(sub(b,a))),{size:i.labelSize||s.labelSize,fill:i.labelFill||s.labelFill})}
+function text(i,s){let x=n(i.x),y=n(i.y);let o={size:i.size??s.labelSize??.48,fill:i.fill??s.labelFill??'#17202b',anchor:i.anchor||'middle',bold:i.bold};if(i.rotate!=null){emit(`<g transform="rotate(${n(i.rotate)} ${x} ${y})">`);label(x,y,i.text??'',o);emit('</g>')}else label(x,y,i.text??'',o)}
+function cross(i,p,s){let q=point(i.at??i.point,p);if(!q)return;let z=n(i.size,.18);emit(`<path d="M ${q[0]-z} ${q[1]-z}L${q[0]+z} ${q[1]+z}M${q[0]-z} ${q[1]+z}L${q[0]+z} ${q[1]-z}" ${sty(i,s)} fill="none"/>`)}
+function grid(v){if(!$('grid').checked)return;let[x,y,w,h]=v;emit(`<g stroke="#8b98a8" stroke-width=".025" opacity=".22">`);for(let i=Math.ceil(x);i<=x+w;i++)emit(`<path d="M ${i} ${y}V ${y+h}"/>`);for(let j=Math.ceil(y);j<=y+h;j++)emit(`<path d="M ${x} ${j}H ${x+w}"/>`);emit('</g>')}
+function axes(v){if(!$('axes').checked)return;let[x,y,w,h]=v;emit(`<g stroke="#667384" stroke-width=".05" opacity=".8"><path d="M ${x} 0H ${x+w}"/><path d="M 0 ${y}V ${y+h}"/></g>`)}
+function render(){
+  try{
+    scene=JSON.parse(TA.value); const v=scene.viewBox||[-10,-7,20,14],[x,y,w,h]=v,bg=$('bg').value;
+    S.innerHTML=''; labelBoxes.length=0;
+    S.setAttribute('viewBox',`${x+pan[0]} ${y+pan[1]} ${w/zoom} ${h/zoom}`);
+    if(bg!=='none')emit(`<rect x="${x-100}" y="${y-100}" width="${w+200}" height="${h+200}" fill="${bg}"/>`);
+    grid(v); axes(v);
+    const pts={}; for(const[k,val]of Object.entries(scene.points||{})) pts[k]={xy:Array.isArray(val)?val:[val.x,val.y],...((val&&typeof val==='object'&&!Array.isArray(val))?val:{})};
+    const items=scene.items||[], style=scene.style||{};
+    const groups={fill:[],shape:[],annotation:[],label:[]};
+    // Render in predictable visual order. The individual renderers write directly to SVG;
+    // temporarily redirect emit so each item is accumulated in its layer.
+    const originalEmit=emit;
+    for(const i of items){
+      let f={segment:(a,p,s)=>line(a,p,s,'segment'),line:(a,p,s)=>line(a,p,s,'line'),ray:(a,p,s)=>line(a,p,s,'ray'),polygon,polyline,point:pointItem,circle,ellipse,arc,angle,rightAngle,tick,dimension,text,cross}[i.type];
+      if(!f)continue;
+      let buf=''; emit=(x)=>buf+=x;
+      f(i,pts,style); emit=originalEmit;
+      const layer=(i.type==='polygon'||i.type==='ellipse'||i.type==='circle')?'fill':(['segment','line','ray','polyline'].includes(i.type)?'shape':(['point','text'].includes(i.type)?'label':'annotation'));
+      groups[layer].push(buf);
+    }
+    // Labels/points intentionally last so they remain legible over geometry.
+    for(const name of ['fill','shape','annotation','label']) if(groups[name].length) S.insertAdjacentHTML('beforeend',`<g data-layer="${name}">${groups[name].join('')}</g>`);
+    if(scene.labels?.points!==false){
+      // Only auto-label points that were not explicitly rendered as point items with a label.
+      const explicit=new Set(items.filter(i=>i.type==='point' && i.label!=null).map(i=>String(i.id??i.point)));
+      let buf=''; const old=emit; emit=(x)=>buf+=x;
+      for(const[k,vv]of Object.entries(pts)) if(!explicit.has(String(k))) pointItem({id:k,label:k,labelOffset:vv.labelOffset},pts,style);
+      emit=old; if(buf)S.insertAdjacentHTML('beforeend',`<g data-layer="point-labels">${buf}</g>`);
+    }
+    $('meta').textContent=`${Object.keys(pts).length} points · ${items.length} items`;
+    ST.textContent='Rendered successfully.'; ST.className='status ok';
+  }catch(e){ST.textContent='JSON error: '+e.message;ST.className='status bad'}
+}
+$('render').onclick=render;$('pretty').onclick=()=>{try{TA.value=JSON.stringify(JSON.parse(TA.value),null,2);render()}catch{}};$('example').onclick=()=>{TA.value=JSON.stringify(EXAMPLE,null,2);zoom=1;pan=[0,0];render()};$('download').onclick=()=>{let blob=new Blob([new XMLSerializer().serializeToString(S)],{type:'image/svg+xml'}),a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='geometry.svg';a.click();setTimeout(()=>URL.revokeObjectURL(a.href),500)};$('zin').onclick=()=>{zoom=Math.min(20,zoom*1.2);render()};$('zout').onclick=()=>{zoom=Math.max(.2,zoom/1.2);render()};$('reset').onclick=()=>{zoom=1;pan=[0,0];render()};$('grid').onchange=render;$('axes').onchange=render;$('bg').onchange=render;TA.addEventListener('keydown',e=>{if((e.ctrlKey||e.metaKey)&&e.key==='Enter'){e.preventDefault();render()}});S.addEventListener('wheel',e=>{e.preventDefault();zoom*=e.deltaY<0?1.12:.89;zoom=Math.max(.2,Math.min(20,zoom));render()},{passive:false});S.addEventListener('pointerdown',e=>{drag=true;ds=[e.clientX,e.clientY];ps=[...pan];S.setPointerCapture(e.pointerId)});S.addEventListener('pointermove',e=>{if(!drag)return;let r=S.getBoundingClientRect(),v=scene.viewBox||[-10,-7,20,14],scale=Math.max(r.width,r.height)/Math.max(v[2],v[3]);pan=[ps[0]-(e.clientX-ds[0])/scale,ps[1]-(e.clientY-ds[1])/scale];render()});S.addEventListener('pointerup',()=>drag=false);S.addEventListener('pointercancel',()=>drag=false);render();
+</script></body></html>
