@@ -1,3 +1,5 @@
+console.log("starting build...")
+
 fetch('/build/ui.html')
   .then(response => response.text())
   .then(html => {
@@ -7,8 +9,8 @@ fetch('/build/ui.html')
 
     // Add components
     const components = document.createElement('script');
-    script.src = '/scripts/components.js';
-    script.type = 'text/javascript';
+    components.src = '/scripts/components.js';
+    components.type = 'text/javascript';
     document.body.appendChild(components);
 
     // Run main script
