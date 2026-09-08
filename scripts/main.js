@@ -1,1 +1,1 @@
-console.log("NBHSmath v0.1 alpha build complete!")
+console.log("\n\n", performance.now(), "App Starting...")
