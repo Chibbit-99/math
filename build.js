@@ -18,5 +18,7 @@ fetch('/build/ui.html')
     script.src = '/scripts/main.js';
     script.type = 'text/javascript';
     document.body.appendChild(script);
+
+    console.log(performance.now(), "NBHSmath v0.1 alpha build complete!")
   })
   .catch(error => console.error('Error fetching the HTML:', error));
