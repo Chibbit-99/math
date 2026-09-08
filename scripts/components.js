@@ -1,3 +1,5 @@
+console.log("loading ui components")
+
 // Find all elements with the 'component' attribute
 const components = document.querySelectorAll('[component]');
 
