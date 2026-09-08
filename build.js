@@ -1,4 +1,4 @@
-console.log("starting build...")
+console.log(performance.now(), "starting build...");
 
 fetch('/build/ui.html')
   .then(response => response.text())
