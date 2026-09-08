@@ -1,0 +1,8 @@
+<button style="--color:#000000; font-family:inherit; display:inline-block; width:8em; height:2.6em; line-height:2.5em; margin:20px; position:relative; cursor:pointer; overflow:hidden; border:2px solid var(--color); transition:color 0.5s; z-index:1; font-size:17px; border-radius:6px; font-weight:500; color:var(--color);"
+  onmouseover="this.querySelector('.blob').style.top='-30px'; this.querySelector('.blob').style.left='-30px'; this.style.color='#fff';"
+  onmouseout="this.querySelector('.blob').style.top='100%'; this.querySelector('.blob').style.left='100%'; this.style.color='var(--color)';"
+  onmousedown="this.querySelector('.blob').style.background='#3a0ca3'; this.querySelector('.blob').style.transition='background 0s';"
+  onmouseup="this.querySelector('.blob').style.background='var(--color)'; this.querySelector('.blob').style.transition='background 0.7s';">
+  <span class="blob" style="content:''; position:absolute; z-index:-1; background:var(--color); height:150px; width:200px; border-radius:50%; top:100%; left:100%; transition:all 0.7s;"></span>
+  Hover me
+</button>
